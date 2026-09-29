@@ -2,7 +2,7 @@ import { ROAD_ACCESS_RANGE } from '../config';
 import { CAPACITY } from '../sim/demand';
 import { maxLevel } from '../sim/growth';
 import { Simulation } from '../sim/simulation';
-import { Terrain, ZONE_NAMES, Zone } from '../sim/types';
+import { Road, Terrain, ZONE_NAMES, Zone } from '../sim/types';
 
 export interface TileInfo {
   title: string;
@@ -32,13 +32,29 @@ export function describeTile(sim: Simulation, x: number, z: number): TileInfo {
   const i = world.idx(x, z);
   const coords: [string, string] = ['Location', `${x}, ${z}`];
 
+  if (world.road[i] === Road.Highway) {
+    return {
+      title: 'Highway',
+      subtitle: world.terrain[i] === Terrain.Water ? 'Bridge' : 'Link to the outside world',
+      accent: '#ec963c',
+      rows: [coords],
+      hint: 'New residents, workers and goods arrive here. Connect your streets to it.',
+    };
+  }
   if (world.terrain[i] === Terrain.Water) {
     return { title: 'Water', subtitle: 'Not buildable', accent: '#3f8fc4', rows: [coords] };
   }
   if (world.road[i]) {
     const links = [0, 1, 2, 3].filter((k) => world.roadMask(x, z) & (1 << k)).length;
     const kind = links >= 3 ? 'Intersection' : links === 2 ? 'Street' : 'Dead end';
-    return { title: 'Road', subtitle: kind, accent: '#9aa0a6', rows: [coords] };
+    const connected = world.roadConnected[i] === 1;
+    return {
+      title: 'Road',
+      subtitle: kind,
+      accent: '#9aa0a6',
+      rows: [coords, ['Highway link', connected ? 'Connected' : 'Not connected']],
+      hint: connected ? undefined : 'Extend this road to the highway so people can reach it.',
+    };
   }
 
   const zone = world.zone[i] as Zone;
@@ -70,7 +86,9 @@ export function describeTile(sim: Simulation, x: number, z: number): TileInfo {
   let hint: string | undefined;
   if (!access) {
     subtitle = level > 0 ? 'Declining' : 'Cannot develop';
-    hint = `Needs a road within ${ROAD_ACCESS_RANGE} tiles.`;
+    hint = world.isDisconnected(i)
+      ? 'Its road does not connect to the highway, so nobody can get here.'
+      : `Needs a road within ${ROAD_ACCESS_RANGE} tiles.`;
   } else if (level === 0) {
     hint = 'Develops when there is demand for this zone.';
   }

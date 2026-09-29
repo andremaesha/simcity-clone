@@ -348,6 +348,23 @@ button {
   pointer-events: none;
 }
 
+.notice {
+  position: absolute;
+  left: 50%;
+  bottom: 92px;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 7px 14px;
+  border-radius: 9px;
+  background: rgba(58, 38, 10, 0.88);
+  border: 1px solid rgba(255, 181, 71, 0.5);
+  color: #ffd08a;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+}
+
 /* ---------------------------------------------------------------- info panel */
 
 .info {
@@ -484,10 +501,10 @@ button {
   transition: opacity 0.4s, transform 0.4s;
 }
 
-.toast.good {
+.toast-good {
   border-left-color: var(--good);
 }
-.toast.warn {
+.toast-warn {
   border-left-color: var(--warn);
 }
 .toast.leaving {

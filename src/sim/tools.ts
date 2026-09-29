@@ -1,5 +1,5 @@
 import { COSTS } from '../config';
-import { Terrain, Tool, Zone } from './types';
+import { Road, Terrain, Tool, Zone } from './types';
 import { World } from './world';
 
 export interface PlanTile {
@@ -55,7 +55,8 @@ export function planTool(world: World, tool: Tool, ax: number, az: number, bx: n
 function evaluateTile(world: World, tool: Tool, x: number, z: number): PlanTile | null {
   const i = world.idx(x, z);
   const water = world.terrain[i] === Terrain.Water;
-  const road = world.road[i] === 1;
+  const road = world.road[i] !== Road.None;
+  const highway = world.road[i] === Road.Highway;
   const building = world.hasBuilding(i);
   const treeCost = world.trees[i] > 0 ? COSTS.clearTree : 0;
 
@@ -78,6 +79,8 @@ function evaluateTile(world: World, tool: Tool, x: number, z: number): PlanTile 
       return { x, z, ok: !building, cost: 0 };
     }
     case Tool.Bulldoze: {
+      // The highway is the city's lifeline and cannot be demolished.
+      if (highway) return { x, z, ok: false, cost: 0 };
       if (road) return { x, z, ok: true, cost: COSTS.bulldoze };
       if (building) return { x, z, ok: true, cost: COSTS.bulldozeBuilding * world.level[i] };
       if (treeCost) return { x, z, ok: true, cost: treeCost };
@@ -108,7 +111,7 @@ export function applyPlan(world: World, plan: Plan): void {
         world.setZone(i, Zone.None);
         break;
       case Tool.Bulldoze:
-        if (world.road[i]) world.setRoad(i, false);
+        if (world.road[i] === Road.Street) world.setRoad(i, false);
         else if (world.hasBuilding(i)) world.clearBuilding(i);
         else world.trees[i] = 0;
         world.markDirty(i);

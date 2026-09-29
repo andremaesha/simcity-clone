@@ -1,5 +1,5 @@
 import { ROAD_ACCESS_RANGE } from '../config';
-import { DIRS, Terrain, Zone } from './types';
+import { DIRS, NO_DIR, Road, Terrain, Zone } from './types';
 
 /**
  * The tile grid, stored as struct-of-arrays so it is cheap to iterate and trivial to serialise.
@@ -14,7 +14,10 @@ export class World {
   /** Number of trees on the tile (0..3). */
   trees: Uint8Array;
   zone: Uint8Array;
+  /** Road type (see `Road`): none, street, or highway lane. */
   road: Uint8Array;
+  /** Travel direction (index into DIRS) of highway lanes, NO_DIR elsewhere. */
+  highwayDir: Uint8Array;
   /** Development level of a zone tile: 0 = empty lot, 1..MAX_LEVEL = building density. */
   level: Uint8Array;
   /** Random per-building style seed, re-rolled whenever a building is (re)built. */
@@ -22,8 +25,14 @@ export class World {
   /** Ticks left until the building on this tile finishes construction (0 = done). */
   construction: Uint8Array;
 
-  /** Derived: Manhattan distance to the nearest road, 255 when farther than ROAD_ACCESS_RANGE. */
+  /** Bumped on every road change, so caches built from the road network know when to refresh. */
+  roadVersion = 0;
+  /** Derived: 1 for road tiles whose network reaches the highway. */
+  roadConnected: Uint8Array;
+  /** Derived: distance to the nearest street connected to the highway (255 when out of range). This is what zones need. */
   roadDist: Uint8Array;
+  /** Derived: distance to the nearest street of any kind, used to explain why a zone is not served. */
+  streetDist: Uint8Array;
   private roadsChanged = true;
 
   /** 0 = clean, otherwise 1 + the radius (in tiles) whose visuals the change can affect. */
@@ -38,10 +47,13 @@ export class World {
     this.trees = new Uint8Array(this.count);
     this.zone = new Uint8Array(this.count);
     this.road = new Uint8Array(this.count);
+    this.highwayDir = new Uint8Array(this.count).fill(NO_DIR);
     this.level = new Uint8Array(this.count);
     this.variant = new Uint8Array(this.count);
     this.construction = new Uint8Array(this.count);
+    this.roadConnected = new Uint8Array(this.count);
     this.roadDist = new Uint8Array(this.count).fill(255);
+    this.streetDist = new Uint8Array(this.count).fill(255);
     this.dirtyFlags = new Uint8Array(this.count);
   }
 
@@ -57,11 +69,20 @@ export class World {
     return this.inBounds(x, z) && this.terrain[this.idx(x, z)] === Terrain.Water;
   }
 
+  /** Any kind of road (street or highway). */
   isRoad(x: number, z: number): boolean {
-    return this.inBounds(x, z) && this.road[this.idx(x, z)] === 1;
+    return this.inBounds(x, z) && this.road[this.idx(x, z)] !== Road.None;
   }
 
-  /** Bitmask of road neighbours, bit k set when DIRS[k] is a road. */
+  isStreet(x: number, z: number): boolean {
+    return this.inBounds(x, z) && this.road[this.idx(x, z)] === Road.Street;
+  }
+
+  isHighway(x: number, z: number): boolean {
+    return this.inBounds(x, z) && this.road[this.idx(x, z)] === Road.Highway;
+  }
+
+  /** Bitmask of road neighbours (streets and highways), bit k set when DIRS[k] is a road. */
   roadMask(x: number, z: number): number {
     let mask = 0;
     for (let k = 0; k < 4; k++) {
@@ -99,9 +120,20 @@ export class World {
     }
   }
 
+  /** Builds or removes a street. Highway lanes are fixed and never touched by this. */
   setRoad(i: number, value: boolean): void {
-    this.road[i] = value ? 1 : 0;
+    if (this.road[i] === Road.Highway) return;
+    this.road[i] = value ? Road.Street : Road.None;
     this.roadsChanged = true;
+    this.roadVersion++;
+    this.markDirty(i, ROAD_ACCESS_RANGE);
+  }
+
+  setHighway(i: number, dir: number): void {
+    this.road[i] = Road.Highway;
+    this.highwayDir[i] = dir;
+    this.roadsChanged = true;
+    this.roadVersion++;
     this.markDirty(i, ROAD_ACCESS_RANGE);
   }
 
@@ -117,24 +149,56 @@ export class World {
     this.markDirty(i);
   }
 
-  /** Recomputes `roadDist` with a multi-source BFS if any road changed. */
+  /** Recomputes highway connectivity and the access distance fields if any road changed. */
   updateRoadAccess(): void {
     if (!this.roadsChanged) return;
     this.roadsChanged = false;
-    const { size, roadDist } = this;
-    roadDist.fill(255);
+    this.floodConnected();
+    this.distanceField(this.roadDist, (i) => this.road[i] === Road.Street && this.roadConnected[i] === 1);
+    this.distanceField(this.streetDist, (i) => this.road[i] === Road.Street);
+  }
+
+  /** Flood fill over all roads starting from the highway: everything reached is connected to the outside world. */
+  private floodConnected(): void {
+    const { size, road, roadConnected } = this;
+    roadConnected.fill(0);
     const queue = new Int32Array(this.count);
-    let head = 0;
     let tail = 0;
     for (let i = 0; i < this.count; i++) {
-      if (this.road[i]) {
-        roadDist[i] = 0;
+      if (road[i] === Road.Highway) {
+        roadConnected[i] = 1;
         queue[tail++] = i;
       }
     }
-    while (head < tail) {
-      const i = queue[head++];
-      const d = roadDist[i];
+    for (let head = 0; head < tail; head++) {
+      const i = queue[head];
+      const x = i % size;
+      const z = (i - x) / size;
+      for (const [dx, dz] of DIRS) {
+        if (!this.isRoad(x + dx, z + dz)) continue;
+        const n = this.idx(x + dx, z + dz);
+        if (roadConnected[n]) continue;
+        roadConnected[n] = 1;
+        queue[tail++] = n;
+      }
+    }
+  }
+
+  /** Multi-source BFS (up to ROAD_ACCESS_RANGE, not across water) from every tile where `isSource` holds. */
+  private distanceField(out: Uint8Array, isSource: (i: number) => boolean): void {
+    const { size } = this;
+    out.fill(255);
+    const queue = new Int32Array(this.count);
+    let tail = 0;
+    for (let i = 0; i < this.count; i++) {
+      if (isSource(i)) {
+        out[i] = 0;
+        queue[tail++] = i;
+      }
+    }
+    for (let head = 0; head < tail; head++) {
+      const i = queue[head];
+      const d = out[i];
       if (d >= ROAD_ACCESS_RANGE) continue;
       const x = i % size;
       const z = (i - x) / size;
@@ -143,15 +207,21 @@ export class World {
         const nz = z + dz;
         if (!this.inBounds(nx, nz)) continue;
         const n = this.idx(nx, nz);
-        if (roadDist[n] !== 255 || this.terrain[n] === Terrain.Water) continue;
-        roadDist[n] = d + 1;
+        if (out[n] !== 255 || this.terrain[n] === Terrain.Water || this.road[n] === Road.Highway) continue;
+        out[n] = d + 1;
         queue[tail++] = n;
       }
     }
   }
 
+  /** A zone tile is served when a street connected to the highway is within ROAD_ACCESS_RANGE. */
   hasRoadAccess(i: number): boolean {
     return this.roadDist[i] <= ROAD_ACCESS_RANGE;
+  }
+
+  /** Near a street, but that street network does not reach the highway. */
+  isDisconnected(i: number): boolean {
+    return this.streetDist[i] <= ROAD_ACCESS_RANGE && this.roadDist[i] > ROAD_ACCESS_RANGE;
   }
 
   /** Forces derived data to be recomputed, e.g. after loading a save. */

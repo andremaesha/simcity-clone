@@ -1,6 +1,7 @@
 import { WATER_DEPTH } from '../config';
 import { hash3 } from '../sim/rng';
-import { DIRS, Terrain, Zone } from '../sim/types';
+import { isJunction } from '../sim/roadNetwork';
+import { DIRS, Road, Terrain, Zone } from '../sim/types';
 import { World } from '../sim/world';
 import { meshBuilding } from './buildingMesher';
 import { GeometryBuilder } from './geometryBuilder';
@@ -31,11 +32,14 @@ export function meshTile(world: World, x: number, z: number, b: GeometryBuilder)
 
   if (world.terrain[i] === Terrain.Water) {
     meshWater(world, x, z, b);
+    if (world.road[i] === Road.Highway) meshHighway(world, x, z, b, true);
     return;
   }
 
   b.setFrame(cx, cz, 0);
-  if (world.road[i]) {
+  if (world.road[i] === Road.Highway) {
+    meshHighway(world, x, z, b, false);
+  } else if (world.road[i] === Road.Street) {
     meshRoad(world, x, z, b);
   } else {
     meshGround(world, x, z, b);
@@ -64,6 +68,43 @@ function meshWater(world: World, x: number, z: number, b: GeometryBuilder): void
   const color = mix(C.water, C.waterDeep, depth * 0.8 + hash3(x, z, 5) * 0.2);
   b.setFrame(x + 0.5, z + 0.5, 0);
   b.flat(-0.5, -0.5, 0.5, 0.5, -WATER_DEPTH, color);
+}
+
+/**
+ * One carriageway tile of the highway: two lanes in the lane's travel direction. Built in a frame
+ * where local +z is the direction of travel, so the right shoulder is local -x and the opposite
+ * carriageway (with the median barrier) is local +x. Over water it becomes a bridge deck on piers.
+ */
+function meshHighway(world: World, x: number, z: number, b: GeometryBuilder, bridge: boolean): void {
+  const i = world.idx(x, z);
+  const d = world.highwayDir[i];
+  const [lx, lz] = DIRS[(d + 1) % 4];
+  const [rx, rz] = DIRS[(d + 3) % 4];
+  const oppositeLane = world.isHighway(x + lx, z + lz) ? world.idx(x + lx, z + lz) : -1;
+  const streetOnRight = world.isStreet(x + rx, z + rz);
+  const interchange = isJunction(world, i) || (oppositeLane >= 0 && isJunction(world, oppositeLane));
+
+  b.setFrame(x + 0.5, z + 0.5, d);
+  if (bridge) {
+    b.box(-0.5, -0.08, -0.5, 0.5, 0, 0.5, C.barrier, { top: C.highway, ao: false });
+    if ((x + z) % 2 === 0) b.box(-0.12, -WATER_DEPTH, -0.1, 0.12, -0.08, 0.1, shade(C.barrier, 0.8), { ao: false });
+  } else {
+    b.flat(-0.5, -0.5, 0.5, 0.5, LAYER.ground, C.highway);
+  }
+
+  // Dashed lane divider, solid shoulder line (broken where a street joins) and yellow median line.
+  for (const s of [-0.45, -0.05]) b.flat(-0.015, s, 0.015, s + 0.25, LAYER.marking, C.roadWhite);
+  if (!streetOnRight) b.flat(-0.43, -0.5, -0.41, 0.5, LAYER.marking, C.roadWhite);
+  b.flat(0.41, -0.5, 0.43, 0.5, LAYER.marking, C.roadLine);
+
+  // Median barrier, open at interchanges so traffic can cross to the other carriageway.
+  if (oppositeLane >= 0 && !interchange) b.box(0.46, 0, -0.5, 0.5, 0.07, 0.5, C.barrier);
+  // Guardrail on the outer shoulder, open where a street joins.
+  if (!streetOnRight) {
+    b.box(-0.5, 0.035, -0.5, -0.475, 0.06, 0.5, C.guardrail, { ao: false });
+    for (const s of [-0.3, 0.2]) b.box(-0.495, 0, s, -0.48, 0.035, s + 0.02, C.guardrail);
+  }
+  b.setFrame(x + 0.5, z + 0.5, 0);
 }
 
 function meshGround(world: World, x: number, z: number, b: GeometryBuilder): void {

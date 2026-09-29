@@ -48,6 +48,7 @@ export function computeStats(world: World): CityStats {
     const zone = world.zone[i] as Zone;
     if (zone === Zone.None) continue;
     stats.zonedTiles[zone]++;
+    if (world.isDisconnected(i)) stats.disconnectedTiles++;
     const level = world.level[i];
     if (level === 0) continue;
     const cap = CAPACITY[zone][level];
@@ -71,18 +72,16 @@ function addCapacity(stats: CityStats, zone: Zone, cap: number, done: boolean): 
   }
 }
 
-/** Advances construction timers; returns how many buildings finished this tick. */
-export function tickConstruction(world: World): number {
-  let finished = 0;
+/** Advances construction timers; the tiles of buildings that finished this tick are appended to `finished`. */
+export function tickConstruction(world: World, finished: number[]): void {
   for (let i = 0; i < world.count; i++) {
     if (world.construction[i] === 0) continue;
     world.construction[i]--;
     if (world.construction[i] === 0) {
       world.markDirty(i);
-      finished++;
+      finished.push(i);
     }
   }
-  return finished;
 }
 
 /**

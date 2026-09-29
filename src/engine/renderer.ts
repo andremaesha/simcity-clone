@@ -76,6 +76,8 @@ export class Renderer {
   readonly antialiasing: 'msaa' | 'fxaa';
   /** Shared by every chunk mesh and the map base. */
   readonly cityMaterial: MeshLambertMaterial;
+  /** Shared by instanced moving things (vehicles, pedestrians). Same look, separate program for instancing. */
+  readonly agentMaterial: MeshLambertMaterial;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     const lowPower = isLowPowerGpu();
@@ -94,6 +96,7 @@ export class Renderer {
     this.gl.toneMappingExposure = EXPOSURE;
     exposureUniform.uCityExposure.value = EXPOSURE;
     this.cityMaterial = createCityMaterial({ manualToneMapping: lowPower });
+    this.agentMaterial = createCityMaterial({ manualToneMapping: lowPower });
 
     this.scene.background = SKY;
     this.scene.fog = new Fog(SKY, 100, 400);

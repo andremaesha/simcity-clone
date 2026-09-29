@@ -12,6 +12,8 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const POPULATION_MILESTONES = [100, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000, 100_000];
 /** Never run more than this many ticks per frame, so a slow frame cannot snowball. */
 const MAX_TICKS_PER_UPDATE = 12;
+/** Finished buildings nobody consumed (e.g. no renderer attached) are dropped beyond this. */
+const MAX_COMPLETED_QUEUE = 200;
 
 export interface ToolResult {
   ok: boolean;
@@ -29,6 +31,8 @@ export class Simulation {
   lastMonthIncome = 0;
   /** Index into POPULATION_MILESTONES of the next milestone to announce. */
   nextMilestone = 0;
+  /** Tiles whose building just finished construction (newcomers move in); drained by the traffic layer. */
+  readonly completed: number[] = [];
 
   onMessage: (text: string, kind: MessageKind) => void = () => {};
 
@@ -60,7 +64,8 @@ export class Simulation {
   step(): void {
     const { world } = this;
     world.updateRoadAccess();
-    tickConstruction(world);
+    tickConstruction(world, this.completed);
+    if (this.completed.length > MAX_COMPLETED_QUEUE) this.completed.splice(0, this.completed.length - MAX_COMPLETED_QUEUE);
     this.stats = computeStats(world);
     refillBudget(this.budget, this.stats);
     this.demand = tickGrowth(world, this.stats, this.budget, this.tick, this.rng);

@@ -1,6 +1,7 @@
 import { FLOOR_HEIGHT as F } from '../config';
 import { Rng, hash3 } from '../sim/rng';
-import { DIRS, Zone } from '../sim/types';
+import { frontage } from '../sim/frontage';
+import { Zone } from '../sim/types';
 import { World } from '../sim/world';
 import { GeometryBuilder, Win } from './geometryBuilder';
 import {
@@ -25,7 +26,7 @@ const CAR_COLORS = [0xd23c3c, 0x2f63b8, 0xeeeeee, 0x333638, 0xe0b22c, 0x3f8f5f, 
 
 /**
  * Procedural building for a developed zone tile. Everything is authored in the local frame
- * (tile centre at the origin, front facing +z toward the road) and rotated by `facing`.
+ * (tile centre at the origin, front facing +z toward the road) and rotated to face its street.
  */
 export function meshBuilding(world: World, x: number, z: number, b: GeometryBuilder): void {
   const i = world.idx(x, z);
@@ -33,7 +34,7 @@ export function meshBuilding(world: World, x: number, z: number, b: GeometryBuil
   const level = world.level[i];
   const variant = world.variant[i];
   const rng = new Rng(Math.floor(hash3(x, z, variant) * 0x7fffffff));
-  b.setFrame(x + 0.5, z + 0.5, facing(world, x, z, variant));
+  b.setFrame(x + 0.5, z + 0.5, frontage(world, x, z, variant).dir);
 
   if (world.construction[i] > 0) {
     construction(b, rng, level);
@@ -51,18 +52,6 @@ export function meshBuilding(world: World, x: number, z: number, b: GeometryBuil
       [workshop, warehouse, factory, heavyPlant][level - 1]?.(b, rng);
       break;
   }
-}
-
-/** Direction (index into DIRS) the building should face: an adjacent road, else the nearest road in a straight line. */
-export function facing(world: World, x: number, z: number, variant: number): number {
-  const start = variant % 4;
-  for (let dist = 1; dist <= 3; dist++) {
-    for (let s = 0; s < 4; s++) {
-      const k = (start + s) % 4;
-      if (world.isRoad(x + DIRS[k][0] * dist, z + DIRS[k][1] * dist)) return k;
-    }
-  }
-  return start;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -60,5 +60,6 @@ export function emptyStats(): CityStats {
     plannedIndJobs: 0,
     zonedTiles: { 0: 0, 1: 0, 2: 0, 3: 0 },
     developedTiles: { 0: 0, 1: 0, 2: 0, 3: 0 },
+    disconnectedTiles: 0,
   };
 }

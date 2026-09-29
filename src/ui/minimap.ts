@@ -1,4 +1,4 @@
-import { Terrain, Zone } from '../sim/types';
+import { Road, Terrain, Zone } from '../sim/types';
 import { World } from '../sim/world';
 
 type RGBA = readonly [number, number, number];
@@ -8,6 +8,7 @@ const COLORS = {
   forest: [66, 120, 58],
   water: [63, 143, 196],
   road: [70, 72, 78],
+  highway: [236, 150, 60],
   construction: [150, 110, 70],
 } satisfies Record<string, RGBA>;
 
@@ -72,7 +73,8 @@ export class Minimap {
     const data = this.image.data;
     for (let i = 0; i < world.count; i++) {
       let c: RGBA;
-      if (world.terrain[i] === Terrain.Water) c = COLORS.water;
+      if (world.road[i] === Road.Highway) c = COLORS.highway;
+      else if (world.terrain[i] === Terrain.Water) c = COLORS.water;
       else if (world.road[i]) c = COLORS.road;
       else if (world.zone[i] !== Zone.None) {
         const zone = world.zone[i] as Zone;

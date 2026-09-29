@@ -68,7 +68,11 @@ export function createCityMaterial({ manualToneMapping = false } = {}): MeshLamb
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vWindow = aWindow;
-        vCityPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        #ifdef USE_INSTANCING
+          vCityPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+        #else
+          vCityPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        #endif
         vCityNormal = normalize(mat3(modelMatrix) * objectNormal);`,
       );
 

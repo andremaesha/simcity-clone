@@ -1,10 +1,13 @@
+import { placeHighway } from './mapgen';
+import { Rng } from './rng';
 import { Simulation } from './simulation';
 import { World } from './world';
 
-const SAVE_VERSION = 1;
+/** v2 added the highway (`highwayDir`). v1 saves are migrated by laying a highway on load. */
+const SAVE_VERSION = 2;
 
-/** Arrays that make up the persistent world state. Derived data (roadDist) is rebuilt on load. */
-const WORLD_ARRAYS = ['terrain', 'trees', 'zone', 'road', 'level', 'variant', 'construction'] as const;
+/** Arrays that make up the persistent world state. Derived data (road access, connectivity) is rebuilt on load. */
+const WORLD_ARRAYS = ['terrain', 'trees', 'zone', 'road', 'highwayDir', 'level', 'variant', 'construction'] as const;
 type WorldArrayKey = (typeof WORLD_ARRAYS)[number];
 
 export interface CameraState {
@@ -25,7 +28,8 @@ export interface SaveData {
   funds: number;
   lastMonthIncome?: number;
   nextMilestone: number;
-  arrays: Record<WorldArrayKey, string>;
+  /** v1 saves have no `highwayDir`. */
+  arrays: Partial<Record<WorldArrayKey, string>>;
   camera?: CameraState;
 }
 
@@ -49,13 +53,20 @@ export function serialize(sim: Simulation, camera?: CameraState): SaveData {
 }
 
 export function deserialize(data: SaveData): Simulation {
-  if (data.version !== SAVE_VERSION) throw new Error(`Unsupported save version ${data.version}`);
+  if (data.version < 1 || data.version > SAVE_VERSION) throw new Error(`Unsupported save version ${data.version}`);
   const world = new World(data.size, data.seed);
   for (const key of WORLD_ARRAYS) {
-    const bytes = fromBase64(data.arrays[key]);
+    const encoded = data.arrays[key];
+    if (encoded === undefined) {
+      if (key === 'highwayDir' && data.version === 1) continue;
+      throw new Error(`Corrupt save: ${key} is missing`);
+    }
+    const bytes = fromBase64(encoded);
     if (bytes.length !== world.count) throw new Error(`Corrupt save: ${key} has ${bytes.length} tiles`);
     world[key].set(bytes);
   }
+  // Cities from before the highway existed get one now, or nothing could ever move in again.
+  if (data.version === 1) placeHighway(world, new Rng(data.seed));
   world.invalidateDerived();
   world.markAllDirty();
   const sim = new Simulation(world);

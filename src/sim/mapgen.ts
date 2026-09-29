@@ -1,11 +1,11 @@
 import { fbm } from './noise';
 import { Rng } from './rng';
-import { Terrain } from './types';
+import { Terrain, Zone } from './types';
 import { World } from './world';
 
 const LAKE_FRACTION = 0.07;
 
-/** Fills a fresh world with lakes, an optional river and forests. Deterministic for a given seed. */
+/** Fills a fresh world with lakes, an optional river, forests and the highway. Deterministic for a given seed. */
 export function generateTerrain(world: World, seed: number): void {
   const { size } = world;
   const rng = new Rng(seed);
@@ -37,8 +37,59 @@ export function generateTerrain(world: World, seed: number): void {
   }
 
   removeTinyPonds(world);
+  placeHighway(world, rng);
   world.invalidateDerived();
   world.markAllDirty();
+}
+
+export type Axis = 'x' | 'z';
+
+/**
+ * Lays a two-lane-pair highway across the whole map along `axis`, occupying rows/columns `pos` and
+ * `pos + 1`. Each tile is one direction of travel (right-hand traffic). It is the city's only link
+ * to the outside world: immigrants and freight arrive through it. Over water it becomes a bridge.
+ */
+export function buildHighway(world: World, axis: Axis, pos: number): void {
+  for (let t = 0; t < world.size; t++) {
+    for (const lane of [0, 1]) {
+      const x = axis === 'z' ? pos + lane : t;
+      const z = axis === 'z' ? t : pos + lane;
+      const i = world.idx(x, z);
+      // Along z the lower-x lane heads +z (DIRS[0]); along x the higher-z lane heads +x (DIRS[1]).
+      const dir = axis === 'z' ? (lane === 0 ? 0 : 2) : lane === 1 ? 1 : 3;
+      world.trees[i] = 0;
+      world.setZone(i, Zone.None);
+      world.setHighway(i, dir);
+    }
+  }
+}
+
+/**
+ * Picks a highway line through the middle of the map that crosses as little water as possible and,
+ * when added to an existing city (old saves), as few buildings as possible.
+ */
+export function placeHighway(world: World, rng: Rng): void {
+  const { size } = world;
+  const axis: Axis = rng.chance(0.5) ? 'x' : 'z';
+  let best = Math.floor(size / 2);
+  let bestScore = Infinity;
+  for (let p = Math.floor(size * 0.3); p <= Math.floor(size * 0.7) - 1; p++) {
+    let cost = 0;
+    for (let t = 0; t < size; t++) {
+      for (const lane of [0, 1]) {
+        const x = axis === 'z' ? p + lane : t;
+        const z = axis === 'z' ? t : p + lane;
+        if (world.isWater(x, z)) cost++;
+        if (world.level[world.idx(x, z)] > 0) cost += 3;
+      }
+    }
+    const score = cost + rng.float() * 3;
+    if (score < bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  buildHighway(world, axis, best);
 }
 
 /** A meandering river crossing the whole map along one axis. */

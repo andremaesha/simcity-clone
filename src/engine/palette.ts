@@ -28,6 +28,9 @@ export const C = {
 
   sidewalk: rgb(0xb9b7ae),
   asphalt: rgb(0x4a4d52),
+  highway: rgb(0x3e4146),
+  barrier: rgb(0xc9c6bd),
+  guardrail: rgb(0x98a0a8),
   roadLine: rgb(0xf2d24b),
   roadWhite: rgb(0xeeeeea),
 

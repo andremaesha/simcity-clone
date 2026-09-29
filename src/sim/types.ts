@@ -4,6 +4,17 @@ export const Terrain = {
 } as const;
 export type Terrain = (typeof Terrain)[keyof typeof Terrain];
 
+export const Road = {
+  None: 0,
+  Street: 1,
+  /** One-way highway lane; its travel direction is stored in World.highwayDir. */
+  Highway: 2,
+} as const;
+export type Road = (typeof Road)[keyof typeof Road];
+
+/** World.highwayDir value for tiles that are not highway lanes. */
+export const NO_DIR = 255;
+
 export const Zone = {
   None: 0,
   Residential: 1,
@@ -53,6 +64,8 @@ export interface CityStats {
   plannedIndJobs: number;
   zonedTiles: Record<Zone, number>;
   developedTiles: Record<Zone, number>;
+  /** Zoned tiles next to a street whose network does not reach the highway, so nobody can move in. */
+  disconnectedTiles: number;
 }
 
 export interface Demand {

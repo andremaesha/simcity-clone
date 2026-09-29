@@ -59,6 +59,7 @@ export class Ui {
   private readonly toasts: HTMLElement;
   private readonly dragTip: HTMLElement;
   private readonly perf: HTMLElement;
+  private readonly notice: HTMLElement;
   private readonly modalRoot: HTMLElement;
 
   constructor(
@@ -135,6 +136,8 @@ export class Ui {
       toolbar.append(btn);
     }
     root.append(toolbar);
+    this.notice = h('div.notice.hidden', { role: 'status' });
+    root.append(this.notice);
 
     // --- Info panel, minimap, toasts, drag tooltip, modals ----------------------------------------
     this.info = h('div.panel.info.collapsed');
@@ -168,6 +171,15 @@ export class Ui {
       bar.classList.toggle('negative', v < 0);
     });
     this.speedButtons.forEach((btn, s) => btn.classList.toggle('active', s === sim.speed));
+
+    const cut = sim.stats.disconnectedTiles;
+    this.notice.classList.toggle('hidden', cut === 0);
+    if (cut > 0) {
+      setText(
+        this.notice,
+        `${formatNumber(cut)} zoned tile${cut === 1 ? " isn't" : "s aren't"} connected to the highway, so nobody can move in.`,
+      );
+    }
   }
 
   setTool(tool: Tool): void {
@@ -197,7 +209,7 @@ export class Ui {
   }
 
   toast(text: string, kind: MessageKind = 'info'): void {
-    const el = h(`div.toast.${kind}`, {}, text);
+    const el = h(`div.toast.toast-${kind}`, {}, text);
     this.toasts.append(el);
     setTimeout(() => el.classList.add('leaving'), 3500);
     setTimeout(() => el.remove(), 4000);
@@ -269,8 +281,9 @@ export class Ui {
       h(
         'p',
         {},
-        'Build roads, then zone land next to them. Residential needs jobs, commercial needs residents, ' +
-          'and industry needs workers. Watch the R/C/I demand bars to see what your city wants next.',
+        'Everyone arrives by the highway, so start with a road off it. Zone land along your roads: ' +
+          'residential needs jobs, commercial needs residents, and industry needs workers. ' +
+          'Watch the R/C/I demand bars to see what your city wants next.',
       ),
       table,
       h('div.actions', {}, ok),

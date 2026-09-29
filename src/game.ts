@@ -1,5 +1,7 @@
 import { Matrix4 } from 'three';
 import { AUTOSAVE_INTERVAL_MS, MAP_SIZE, SAVE_KEY } from './config';
+import { Pedestrians } from './engine/agents/pedestrians';
+import { Traffic } from './engine/agents/traffic';
 import { CameraController } from './engine/cameraController';
 import { ChunkManager } from './engine/chunkManager';
 import { Overlay } from './engine/overlay';
@@ -10,7 +12,7 @@ import { randomSeed } from './sim/rng';
 import { CameraState, SaveData, deserialize, serialize } from './sim/save';
 import { Simulation } from './sim/simulation';
 import { planTool } from './sim/tools';
-import { Tool } from './sim/types';
+import { Road, Tool } from './sim/types';
 import { World } from './sim/world';
 import { formatMoney } from './ui/dom';
 import { TileInfo, describeTile } from './ui/inspector';
@@ -25,6 +27,8 @@ interface TileRef {
 const AUTO_GRID_MAX_DISTANCE = 80;
 /** Frames are only rendered when something changed; this is the safety-net interval otherwise (s). */
 const IDLE_RENDER_INTERVAL = 1;
+/** How fast cars and people move at each game speed (pause, normal, fast, very fast). */
+const AGENT_SPEED = [0, 1, 1.7, 2.6];
 
 /** Wires simulation, rendering, input and UI together and runs the frame loop. */
 export class Game {
@@ -33,6 +37,8 @@ export class Game {
   private readonly camera: CameraController;
   private readonly chunks: ChunkManager;
   private readonly overlay: Overlay;
+  private readonly traffic: Traffic;
+  private readonly pedestrians: Pedestrians;
   private readonly ui: Ui;
 
   private tool: Tool = Tool.Inspect;
@@ -68,6 +74,9 @@ export class Game {
     this.chunks.flush();
     this.renderer.buildMapBase(this.sim.world);
     this.overlay = new Overlay(this.renderer.scene, MAP_SIZE);
+    this.traffic = new Traffic(this.renderer.scene, this.sim.world, this.renderer.agentMaterial);
+    this.pedestrians = new Pedestrians(this.renderer.scene, this.sim.world, this.renderer.agentMaterial);
+    if (!saved) this.focusOnHighway();
 
     this.ui = new Ui(
       uiRoot,
@@ -98,6 +107,7 @@ export class Game {
       this.ui.toast(`Welcome back to ${this.sim.cityName}!`);
     } else {
       this.ui.openHelp();
+      this.ui.toast('Build a road off the highway to start your city.');
     }
   }
 
@@ -114,6 +124,10 @@ export class Game {
     this.lastTime = now;
 
     if (!this.ui.modalOpen) this.sim.update(dt);
+    const agentSpeed = this.ui.modalOpen ? 0 : AGENT_SPEED[this.sim.speed] ?? 1;
+    if (this.traffic.update(dt, agentSpeed, this.sim)) this.needsRender = true;
+    const { target, distance } = this.camera;
+    if (this.pedestrians.update(dt, agentSpeed, target.x, target.z, distance)) this.needsRender = true;
     if (this.chunks.update(this.camera.target.x, this.camera.target.z) > 0) {
       this.renderer.requestShadowUpdate();
       this.needsRender = true;
@@ -181,7 +195,7 @@ export class Game {
     const fps = (p.frames * 1000) / elapsed;
     const renders = (p.renders * 1000) / elapsed;
     this.ui.setPerf(
-      `${fps.toFixed(0)} fps · ${renders.toFixed(0)} renders/s · ` +
+      `${fps.toFixed(0)} fps · ${renders.toFixed(0)} renders/s · ${this.traffic.count} vehicles · ` +
         `${s.antialiasing} · res ${s.pixelRatio}x/${s.maxPixelRatio}x · ${s.calls} draws · ${(s.triangles / 1000).toFixed(0)}k tris`,
     );
     p.frames = p.renders = 0;
@@ -370,6 +384,23 @@ export class Game {
     this.ui.showInfo(info);
   }
 
+  /** Points the camera at the stretch of highway closest to the map centre, where a new city usually starts. */
+  private focusOnHighway(): void {
+    const { world } = this.sim;
+    const c = world.size / 2;
+    let best = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < world.count; i++) {
+      if (world.road[i] !== Road.Highway) continue;
+      const d = Math.hypot((i % world.size) + 0.5 - c, Math.floor(i / world.size) + 0.5 - c);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    if (best >= 0) this.camera.lookAt((best % world.size) + 0.5, Math.floor(best / world.size) + 0.5);
+  }
+
   /** The camera's view on the ground, as a polygon in tile coordinates, for the minimap. */
   private viewFootprint(): Array<[number, number]> {
     const rect = this.canvas.getBoundingClientRect();
@@ -404,9 +435,14 @@ export class Game {
     this.chunks.setWorld(sim.world);
     this.chunks.flush();
     this.renderer.buildMapBase(sim.world);
+    this.traffic.reset(sim.world);
+    this.pedestrians.reset(sim.world);
     this.needsRender = true;
     if (camera) this.camera.setState(camera);
-    else this.camera.reset();
+    else {
+      this.camera.reset();
+      this.focusOnHighway();
+    }
     this.ui.update(sim);
     this.ui.toast(`Welcome to ${sim.cityName}!`, 'good');
   }
